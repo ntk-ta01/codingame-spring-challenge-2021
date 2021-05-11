@@ -180,28 +180,54 @@ fn compute_score(
     context: &GameContext,
     forest: &[Tree],
 ) -> (i32, Vec<i32>, Vec<i32>) {
+    // richness 0 は無視できる
     // richness 1, 2, 3にあるサイズ0の木の数
     // サイズ1, 2, 3の木の数
     // スコア
     let mut scoring_factors = vec![0; 7];
     for tree in forest.iter() {
-        if tree.size == 0 {
-            scoring_factors[cells[tree.cell_index].richness - 1] += 1;
-        } else {
-            scoring_factors[tree.size + 2] += 1
+        if tree.is_mine {
+            if tree.size == 0 {
+                scoring_factors[cells[tree.cell_index].richness - 1] += 1;
+            } else {
+                scoring_factors[tree.size + 2] += 1
+            }
         }
     }
-    let scoring_coeffs = if context.day < 10 {
-        vec![5, 6, 7, 8, 13, 20, 1]
-    } else if context.day < 20 {
+    // seedがたくさんあればsunpoint集めターンも必要？
+    let mut scoring_coeffs = if context.day < 2 {
+        vec![0, 0, 5, 10, 10, 20, 0] // GROW
+    } else if context.day < 7 {
         if context.day % 2 == 0 {
-            vec![5, 6, 7, 3, 5, 9, 1]
+            vec![0, 0, 0, 5, 15, 20, 0] // GROW
         } else {
-            vec![1, 1, 1, 1, 2, 5, context.day / 2]
+            vec![1, 20, 500, 1, 0, 0, 0] // SEED
+        }
+    } else if context.day < 10 {
+        vec![1, 1, 1, 10, 50, 20, 0] // grow
+    } else if context.day < 18 {
+        if context.day % 4 == 0 {
+            vec![2, 3, 10, 13, 15, 19, 0] // seed
+        } else if context.day % 5 == 0 {
+            vec![1, 1, 1, 8, 12, 15, 30] // complete
+        } else {
+            vec![0, 3, 4, 13, 15, 19, 0] // grow
         }
     } else {
-        vec![1, 1, 1, 1, 2, 5, 100]
+        vec![0, 0, 0, 1, 2, 5, 100000]
     };
+    let seed_limit = if context.day < 10 {
+        7
+    } else if context.day < 20 {
+        3
+    } else {
+        1
+    };
+    if scoring_factors[..3].iter().sum::<i32>() > seed_limit {
+        for coeff in scoring_coeffs[..3].iter_mut() {
+            *coeff = 0;
+        }
+    }
     (
         scoring_factors
             .iter()
@@ -212,12 +238,73 @@ fn compute_score(
         scoring_coeffs,
     )
 }
+#[derive(Debug, Clone, Copy)]
+struct Cube {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+impl Cube {
+    fn cube_distance(&self, other: &Cube) -> i32 {
+        ((self.x - other.x).abs() + (self.y - other.y).abs() + (self.z - other.z).abs()) / 2
+    }
+}
+
+fn set_coordinates(center: &Cube) -> Vec<Cube> {
+    const DIRECTIONS: [[i32; 3]; 6] = [
+        [1, -1, 0],
+        [1, 0, -1],
+        [0, 1, -1],
+        [-1, 1, 0],
+        [-1, 0, 1],
+        [0, -1, 1],
+    ];
+    let mut coordinates = vec![*center];
+    let mut distance = 1;
+    for direction in DIRECTIONS.iter() {
+        let x = center.x + direction[0] * distance;
+        let y = center.y + direction[1] * distance;
+        let z = center.z + direction[2] * distance;
+        coordinates.push(Cube { x, y, z });
+    }
+    for i in 0..6 {
+        let x = coordinates[i + 1].x + DIRECTIONS[i][0] * distance;
+        let y = coordinates[i + 1].y + DIRECTIONS[i][1] * distance;
+        let z = coordinates[i + 1].z + DIRECTIONS[i][2] * distance;
+        coordinates.push(Cube { x, y, z });
+        let x = coordinates[i + 1].x + DIRECTIONS[(i + 1) % 6][0] * distance;
+        let y = coordinates[i + 1].y + DIRECTIONS[(i + 1) % 6][1] * distance;
+        let z = coordinates[i + 1].z + DIRECTIONS[(i + 1) % 6][2] * distance;
+        coordinates.push(Cube { x, y, z });
+    }
+    distance = 2;
+    for i in 0..6 {
+        let x = coordinates[i + 1].x + DIRECTIONS[i][0] * distance;
+        let y = coordinates[i + 1].y + DIRECTIONS[i][1] * distance;
+        let z = coordinates[i + 1].z + DIRECTIONS[i][2] * distance;
+        coordinates.push(Cube { x, y, z });
+        let x = coordinates[2 * i + 7].x + DIRECTIONS[(i + 1) % 6][0];
+        let y = coordinates[2 * i + 7].y + DIRECTIONS[(i + 1) % 6][1];
+        let z = coordinates[2 * i + 7].z + DIRECTIONS[(i + 1) % 6][2];
+        coordinates.push(Cube { x, y, z });
+        let x = coordinates[i + 1].x + DIRECTIONS[(i + 1) % 6][0] * distance;
+        let y = coordinates[i + 1].y + DIRECTIONS[(i + 1) % 6][1] * distance;
+        let z = coordinates[i + 1].z + DIRECTIONS[(i + 1) % 6][2] * distance;
+        coordinates.push(Cube { x, y, z });
+    }
+    coordinates
+}
+
 /**
  * Auto-generated code below aims at helping you parse
  * the standard input according to the problem statement.
  **/
 fn main() {
     let mut cells = get_area();
+
+    let center = Cube { x: 0, y: 0, z: 0 };
+    let coordinates = set_coordinates(&center);
 
     // game loop
     loop {
@@ -229,7 +316,6 @@ fn main() {
         let context = get_game_context(); // Get input context
         let forest = get_forest(&mut cells); // Get input forest
         let action_list = get_actionlist(); // List of possible actions
-
         let (now_score, scoring_f, scoring_coeffs) = compute_score(&cells, &context, &forest);
         let mut max_score = 0;
 
@@ -241,24 +327,19 @@ fn main() {
             for cell_i in cells.iter() {
                 if let Some(tidx) = cell_i.tree_index {
                     if forest[tidx].is_mine && !forest[tidx].is_dormant {
-                        // 次にSEEDを打った場合の得点を計算する
-                        // cell_iに木がある -> tree_indexに値がある
-                        // cell_iの木からSEEDできるcell全探索
-                        // -> sizeをチェック
-                        // -> cell_i.tree_index Option<usize> を見る
-                        // seed禁止位置（unusable cellや既に木のあるcell）にseedしない
-                        // seedを打てるかどうか確認
-                        // 必要sunpointを持っているか
-                        // match forest[tidx].size {
-                        //     1 => {}
-                        //     2 => {}
-                        //     3 => {}
-                        //     _ => {}
-                        // }
+                        let mut seedables = vec![];
+                        let cube_i = coordinates[cell_i.index];
+                        for cell_j in cells.iter() {
+                            let cube_j = coordinates[cell_j.index];
+                            let dist = cube_i.cube_distance(&cube_j) as usize;
+                            if 2 <= dist && dist <= forest[tidx].size {
+                                seedables.push(cell_j.index as i32);
+                            }
+                        }
                         if forest[tidx].size > 0
                             && scoring_f[..3].iter().sum::<i32>() <= context.sun
                         {
-                            for neigh in cell_i.neighbors_ids.iter() {
+                            for neigh in seedables.iter() {
                                 if *neigh == -1 {
                                     continue;
                                 }
@@ -267,7 +348,15 @@ fn main() {
                                     continue;
                                 }
                                 // 打った場合の評価
-                                let add_score = scoring_coeffs[cells[neigh].richness - 1];
+                                let cube_i = coordinates[cell_i.index];
+                                let cube_j = coordinates[neigh];
+                                let dist = cube_i.cube_distance(&cube_j);
+                                let add_score = (3 - cube_i.cube_distance(&center))
+                                    * scoring_coeffs[cells[neigh].richness - 1]
+                                    * dist
+                                    * dist
+                                    * dist
+                                    * dist;
                                 if max_score < now_score + add_score {
                                     max_score = now_score + add_score;
                                     command = format!("SEED {} {}", cell_i.index, neigh);
@@ -275,30 +364,31 @@ fn main() {
                             }
                         }
                         // 次にGROWを打った場合の得点を計算する
+                        // todo:GROWさせたときの影の影響を考える
                         let tree = &forest[tidx];
                         let add_score = match tree.size {
-                            1 => {
+                            0 => {
                                 if context.sun < 1 + scoring_f[3] {
-                                    0
+                                    -50000
                                 } else {
                                     scoring_coeffs[3]
                                 }
                             }
-                            2 => {
+                            1 => {
                                 if context.sun < 3 + scoring_f[4] {
-                                    0
+                                    -50000
                                 } else {
                                     scoring_coeffs[4]
                                 }
                             }
-                            3 => {
+                            2 => {
                                 if context.sun < 7 + scoring_f[5] {
-                                    0
+                                    -50000
                                 } else {
                                     scoring_coeffs[5]
                                 }
                             }
-                            _ => 0,
+                            _ => -50000,
                         };
                         if max_score < now_score + add_score {
                             max_score = now_score + add_score;
@@ -306,7 +396,17 @@ fn main() {
                         }
 
                         // 次にCOMPLETEを打った場合の得点を計算する
-                        if tree.size == 3 && 4 < context.sun {
+                        let tree_limit = if context.day < 18 {
+                            3
+                        } else if context.day < 21 {
+                            1
+                        } else {
+                            0
+                        };
+                        if scoring_f[3..6].iter().sum::<i32>() > tree_limit
+                            && tree.size == 3
+                            && 4 < context.sun
+                        {
                             let add_score =
                                 (context.nutrients + cell_i.richness as i32) * scoring_coeffs[6];
                             if max_score < now_score + add_score {
